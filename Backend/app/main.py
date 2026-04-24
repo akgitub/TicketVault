@@ -17,7 +17,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(users.router)
 app.include_router(cities.router)
-app.include_router(events.router, prefix="/api")
+app.include_router(events.router)
 app.include_router(tickets.router)
 app.include_router(orders.router)
 app.include_router(confirmations.router)

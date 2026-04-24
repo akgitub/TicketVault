@@ -21,29 +21,30 @@ async def list_events(
     return q.limit(50).execute().data
 
 
-@router.get("/{event_id}")
-async def get_event(
-    event_id: str,
-    # claims: dict = Depends(get_current_user),
-):
-    r = (
-        supabase.table("events")
-        .select("*, cities(name)")
-        .eq("id", event_id)
-        .single()
-        .execute()
-    )
+@router.get("")
+async def list_tickets(event_id: str | None = None):
+    print("🔥 TICKETS ROUTE HIT:", event_id)
 
-    if not r.data:
-        raise HTTPException(status_code=404, detail="Event not found")
+    q = supabase.table("tickets").select("*")
 
-    return r.data
+    if event_id:
+        q = q.eq("event_id", event_id)
+
+    r = q.execute()
+
+    print("RAW RESPONSE:", r)
+
+    data = r.data
+
+    print("DATA:", data)
+
+    return data
 
 # @router.get("")
 # async def list_events(city_id: str | None = None):
 #     return [
 #         {
-#             "id": "1",
+#             "id": "1", 
 #             "title": "Arijit Singh Live",
 #             "city": {"name": "Indore"},
 #             "date": "2026-05-10"

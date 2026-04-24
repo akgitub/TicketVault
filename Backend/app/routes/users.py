@@ -16,29 +16,69 @@ async def upsert_user(
     body: UpsertUserRequest,
     claims: dict = Depends(get_current_user),
 ):
-    """Called on first sign-in to sync Clerk user into Supabase users table."""
+    """
+    Sync Clerk user into Supabase.
+    - If user exists → update
+    - If not → create
+    """
+
     clerk_id = claims["sub"]
-    result = (
+
+    # 🔹 Check if user exists
+    existing = (
         supabase.table("users")
-        .upsert(
-            {"clerk_id": clerk_id, "name": body.name, "email": body.email},
-            on_conflict="clerk_id",
-        )
+        .select("*")
+        .eq("clerk_id", clerk_id)
+        .maybe_single()
         .execute()
     )
-    return result.data[0]
+
+    if existing.data:
+        # 🔹 Update user
+        updated = (
+            supabase.table("users")
+            .update({
+                "name": body.name,
+                "email": body.email,
+            })
+            .eq("clerk_id", clerk_id)
+            .execute()
+        )
+        return updated.data[0]
+
+    # 🔹 Create new user
+    created = (
+        supabase.table("users")
+        .insert({
+            "clerk_id": clerk_id,
+            "name": body.name,
+            "email": body.email,
+        })
+        .execute()
+    )
+
+    return created.data[0]
 
 
 @router.get("/me")
 async def get_me(claims: dict = Depends(get_current_user)):
+    """
+    Get current logged-in user from DB
+    """
     clerk_id = claims["sub"]
+
     result = (
         supabase.table("users")
         .select("*")
         .eq("clerk_id", clerk_id)
-        .single()
+        .maybe_single()
         .execute()
     )
+
     if not result.data:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=404,
+            detail="User not found. Call /users/me POST first."
+        )
+
     return result.data

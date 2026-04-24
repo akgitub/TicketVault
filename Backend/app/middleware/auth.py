@@ -27,6 +27,7 @@ async def get_current_user(
     try:
         jwks = await _get_jwks()
         header = jwt.get_unverified_header(token)
+
         key = next(
             (k for k in jwks["keys"] if k["kid"] == header["kid"]),
             None,
@@ -36,6 +37,7 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid signing key",
             )
+
         payload = jwt.decode(
             token,
             key,
@@ -43,7 +45,28 @@ async def get_current_user(
             issuer=settings.CLERK_JWT_ISSUER,
             options={"verify_aud": False},
         )
+
+        # 🔥 AUTO-SYNC USER HERE
+        from app.database import supabase
+
+        clerk_id = payload["sub"]
+
+        existing = (
+            supabase.table("users")
+            .select("id")
+            .eq("id", clerk_id)
+            .maybe_single()
+            .execute()
+        )
+
+        if not existing.data:
+            supabase.table("users").insert({
+                "id": clerk_id
+            }).execute()
+            print("✅ User synced to DB:", clerk_id)
+
         return payload
+
     except JWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

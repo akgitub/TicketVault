@@ -30,7 +30,6 @@ def _validate_event_city(event_id: str, city_id: str):
     if r.data["city_id"] != city_id:
         raise HTTPException(status_code=400, detail="Event city does not match selected city.")
 
-
 @router.post("/create")
 async def create_ticket(
     event_id: str = Form(...),
@@ -40,64 +39,111 @@ async def create_ticket(
     qr_files: List[UploadFile] = File(...),
     claims: dict = Depends(get_current_user),
 ):
-    seller = _get_user(claims["sub"])
-    _validate_city(city_id)
-    _validate_event_city(event_id, city_id)
-
-    if price <= 0 or original_price <= 0:
-        raise HTTPException(status_code=400, detail="Prices must be positive.")
-    
-    if len(qr_files) != 1:
-        raise HTTPException(status_code=400, detail="Upload exactly 1 QR per ticket.")
-
-    qr_file = qr_files[0]
-    image_bytes = await qr_file.read()
-
-    # Decode QR
     try:
-        qr_data = decode_qr(image_bytes)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        print("🔥 CREATE TICKET HIT")
 
-    # Generate fingerprint
-    fingerprint = generate_fingerprint(qr_data)
+        # 🔹 STEP 1: Get Clerk user ID
+        clerk_id = claims["sub"]
 
-    # Check duplicate
-    dup = supabase.table("ticket_qr").select("id").eq("fingerprint", fingerprint).execute()
-    if dup.data:
-        raise HTTPException(
-            status_code=409,
-            detail="Duplicate QR detected. This ticket has already been listed.",
+        # 🔹 STEP 2: Find user in DB
+        user_res = (
+            supabase.table("users")
+            .select("id")
+            .eq("clerk_id", clerk_id)
+            .maybe_single()
+            .execute()
         )
 
-    storage_path = upload_qr_image(image_bytes, qr_file.content_type or "image/png")
+        if not user_res.data:
+            raise HTTPException(
+                status_code=400,
+                detail="User not synced. Call /users/me first."
+            )
 
-    ticket_res = (
-        supabase.table("tickets")
-        .insert({
-            "event_id": event_id,
-            "seller_id": seller["id"],
-            "city_id": city_id,
-            "price": float(price),
-            "original_price": float(original_price),
+        seller_id = user_res.data["id"]
+
+        # 🔹 Validations
+        _validate_city(city_id)
+        _validate_event_city(event_id, city_id)
+
+        if price <= 0 or original_price <= 0:
+            raise HTTPException(status_code=400, detail="Prices must be positive.")
+        
+        if len(qr_files) != 1:
+            raise HTTPException(status_code=400, detail="Upload exactly 1 QR per ticket.")
+
+        qr_file = qr_files[0]
+        image_bytes = await qr_file.read()
+
+        # 🔹 Decode QR
+        try:
+            qr_data = decode_qr(image_bytes)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        # 🔹 Generate fingerprint
+        fingerprint = generate_fingerprint(qr_data)
+
+        # 🔹 Check duplicate QR
+        dup = (
+            supabase.table("ticket_qrs")
+            .select("id")
+            .eq("fingerprint", fingerprint)
+            .execute()
+        )
+
+        if dup.data:
+            raise HTTPException(
+                status_code=409,
+                detail="Duplicate QR detected. This ticket already exists.",
+            )
+
+        # 🔹 Upload QR image
+        storage_path = upload_qr_image(
+            image_bytes,
+            qr_file.content_type or "image/png"
+        )
+
+        # 🔹 Insert ticket
+        ticket_res = (
+            supabase.table("tickets")
+            .insert({
+                "event_id": event_id,
+                "seller_id": seller_id,  # ✅ FIXED
+                "city_id": city_id,
+                "price": float(price),
+                "original_price": float(original_price),
+                "status": "available",
+            })
+            .execute()
+        )
+
+        if not ticket_res.data:
+            raise HTTPException(status_code=500, detail="Ticket creation failed")
+
+        ticket = ticket_res.data[0]
+
+        # 🔹 Store QR metadata
+        supabase.table("ticket_qrs").insert({
+            "ticket_id": ticket["id"],
+            "qr_image_url": storage_path,
+            "qr_data": qr_data,
+            "fingerprint": fingerprint,
+        }).execute()
+
+        return {
+            "ticket_id": ticket["id"],
+            "listing_fee": round(float(price) * 0.20, 2),
             "status": "available",
-        })
-        .execute()
-    )
-    ticket = ticket_res.data[0]
+        }
 
-    supabase.table("ticket_qrs").insert({
-        "ticket_id": ticket["id"],
-        "qr_image_url": storage_path,
-        "qr_data": qr_data,
-        "fingerprint": fingerprint,
-    }).execute()
+    except HTTPException:
+        raise
 
-    return {
-        "ticket_id": ticket["id"],
-        "listing_fee": round(float(price) * 0.20, 2),
-        "status": "available",
-    }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("")

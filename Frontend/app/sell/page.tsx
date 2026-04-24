@@ -59,8 +59,11 @@ export default function SellPage() {
       form.append("qr_files", qrFile[0]);
 
       await api.post("/tickets/create", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+  headers: {
+    // ❌ DO NOT set content-type
+  },
+  transformRequest: (data) => data, // 🔥 IMPORTANT
+});
 
       router.push("/dashboard");
     } catch (e: any) {
