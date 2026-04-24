@@ -1,0 +1,12 @@
+{
+  "name": "ticketvault",
+  "version": "1.0.0",
+  "scripts": {
+    "backend": "cd Backend && .venv\\Scripts\\python -m uvicorn app.main:app --reload",
+    "frontend": "cd Frontend && npm run dev",
+    "dev": "concurrently -k -n BACKEND,FRONTEND -c yellow,cyan \"npm run backend\" \"npm run frontend\""
+  },
+  "dependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
